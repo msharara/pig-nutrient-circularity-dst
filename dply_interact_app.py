@@ -1,60 +1,67 @@
 # dply_interact_app.py
-import copy
 
+import copy
 import dash
 from dash import dcc, html
+import dash_bootstrap_components as dbc
 from dash.dependencies import Input, Output
 import plotly.graph_objects as go
+
+
+# --------------------------------
+# Initialize Dash with Bootstrap
+# --------------------------------
+app = dash.Dash(
+    __name__,
+    external_stylesheets=[dbc.themes.LUX],
+)
+server = app.server
+
 
 # -----------------------------
 # 1. DATA: compartments & flows
 # -----------------------------
-
-# Compartment (node) names (C1–C13)
 NODES = [
-    "FEED_PURCHASED",   # C1
-    "FEED_HOMEGROWN",   # C2
-    "ANIMALS",          # C3
-    "FEEDER_PIGS_IMP",  # C4
-    "FERT_PURCHASED",   # C5
-    "MANURE_STORAGE",   # C6
-    "SOIL_AVAILABLE",   # C7
-    "SOIL_STABLE",      # C8
-    "CROPS",            # C9
-    "PIG_EXPORTS",      # C10
-    "GRAIN_EXPORTS",    # C11
-    "ENVIRONMENT",      # C12
-    "CARCASSES",        # C13
+    "FEED_PURCHASED",
+    "FEED_HOMEGROWN",
+    "ANIMALS",
+    "FEEDER_PIGS_IMP",
+    "FERT_PURCHASED",
+    "MANURE_STORAGE",
+    "SOIL_AVAILABLE",
+    "SOIL_STABLE",
+    "CROPS",
+    "PIG_EXPORTS",
+    "GRAIN_EXPORTS",
+    "ENVIRONMENT",
+    "CARCASSES",
 ]
 
-# Map node name → index (for Sankey)
 NODE_IDX = {name: i for i, name in enumerate(NODES)}
 
-# Baseline N flows F1–F20 in kg N/year
 BASE_FLOWS_N = {
-    "F1":  4800,  # FEED_PURCHASED → ANIMALS
-    "F2":  800,   # FEED_HOME_TO_PIGS → ANIMALS
-    "F3":  300,   # FEEDER_PIGS_TO_PIGS → ANIMALS
-    "F4":  0,     # FERT_TO_SOIL → SOIL_AVAILABLE
-    "F5":  2400,  # PIG_TO_EXPORT → PIG_EXPORTS
-    "F6":  2400,  # PIG_EXCRETION → MANURE_STORAGE
-    "F7":  900,   # HOUSING_LOSS → ENVIRONMENT
-    "F8":  1900,  # MANURE_TO_SOIL_AV → SOIL_AVAILABLE
-    "F9":  200,   # MANURE_TO_SOIL_ST → SOIL_STABLE
-    "F10": 300,   # STORAGE_LOSS → ENVIRONMENT
-    "F11": 1300,  # CROP_UPTAKE → CROPS
-    "F12": 300,   # FIELD_LOSS → ENVIRONMENT
-    "F13": 300,   # IMMOBILIZATION → SOIL_STABLE
-    "F14": 0,     # MINERALIZATION → SOIL_AVAILABLE
-    "F15": 800,   # CROPS_TO_FEED → FEED_HOMEGROWN
-    "F16": 500,   # CROPS_TO_EXPORT → GRAIN_EXPORTS
-    "F17": 200,   # MORTALITY → CARCASSES
-    "F18": 50,    # CARCASS_TO_SOIL → SOIL_AVAILABLE
-    "F19": 100,   # CARCASS_TO_PIG_EXP → PIG_EXPORTS
-    "F20": 50,    # CARCASS_TO_ENV → ENVIRONMENT
+    "F1": 4800,
+    "F2": 800,
+    "F3": 300,
+    "F4": 0,
+    "F5": 2400,
+    "F6": 2400,
+    "F7": 900,
+    "F8": 1900,
+    "F9": 200,
+    "F10": 300,
+    "F11": 1300,
+    "F12": 300,
+    "F13": 300,
+    "F14": 0,
+    "F15": 800,
+    "F16": 500,
+    "F17": 200,
+    "F18": 50,
+    "F19": 100,
+    "F20": 50,
 }
 
-# Define links (source, target, flow_id)
 LINKS = [
     ("FEED_PURCHASED", "ANIMALS", "F1"),
     ("FEED_HOMEGROWN", "ANIMALS", "F2"),
@@ -80,33 +87,17 @@ LINKS = [
 
 
 # -------------------------------------------------
-# 2. METRICS: Circular / Accessible / Lost for N
+# 2. METRICS
 # -------------------------------------------------
-
-def compute_circularity_metrics_N(flows: dict) -> dict:
-    """
-    Simple demo of circular vs accessible vs lost for N.
-
-    - Input_N: external N into the farm (purchased feed, feeder pigs, fert).
-    - Circular_N: N leaving as useful products (pigs + grain + carcass exports).
-    - Accessible_N: residual N in plant-available soil pool (toy: fixed 50).
-    - Lost_N: env losses + stable soil buildup (treated as 'locked').
-    """
-    # External input N (to farm)
-    input_N = flows["F1"] + flows["F3"] + flows["F4"]  # purchased feed + feeder pigs + fert
-
-    # Useful exports (products)
-    pig_exports = flows["F5"] + flows["F19"]  # market pigs + carcass-derived products
+def compute_circularity_metrics_N(flows):
+    input_N = flows["F1"] + flows["F3"] + flows["F4"]
+    pig_exports = flows["F5"] + flows["F19"]
     grain_exports = flows["F16"]
-    circular_N = pig_exports + grain_exports
 
-    # Accessible residual N in SOIL_AVAILABLE (toy assumption)
+    circular_N = pig_exports + grain_exports
     accessible_N = 50.0
 
-    # Environmental losses (these will change with F7)
     env_loss = flows["F7"] + flows["F10"] + flows["F12"] + flows["F20"]
-
-    # Long-term stable soil buildup (toy assumption)
     locked_stable = 500.0
 
     lost_N = env_loss + locked_stable
@@ -122,153 +113,113 @@ def compute_circularity_metrics_N(flows: dict) -> dict:
 
 
 # -----------------------------------------
-# 3. FIGURES: Sankey + bar chart for N
+# 3. FIGURES
 # -----------------------------------------
-
-def make_sankey_figure(flows: dict) -> go.Figure:
-    """Build a Plotly Sankey figure from NODES and LINKS using N flows."""
+def make_sankey_figure(flows):
     sources = [NODE_IDX[src] for (src, tgt, fid) in LINKS]
     targets = [NODE_IDX[tgt] for (src, tgt, fid) in LINKS]
     values = [flows[fid] for (src, tgt, fid) in LINKS]
 
-    fig = go.Figure(data=[go.Sankey(
-        arrangement="snap",
-        node=dict(
-            pad=15,
-            thickness=20,
-            line=dict(width=0.5),
-            label=NODES,
-        ),
-        link=dict(
-            source=sources,
-            target=targets,
-            value=values,
-        )
-    )])
+    fig = go.Figure(
+        data=[go.Sankey(
+            arrangement="snap",
+            node=dict(
+                pad=15,
+                thickness=20,
+                line=dict(width=0.5),
+                label=NODES,
+            ),
+            link=dict(
+                source=sources,
+                target=targets,
+                value=values,
+            ),
+        )]
+    )
 
     fig.update_layout(
-        title_text="Nitrogen Flows (kg N/year) – Baseline / Scenario",
-        font=dict(size=12),
-        autosize=False,
+        title_text="Nitrogen Flows (kg N/year)",
         width=900,
         height=500,
         margin=dict(l=10, r=10, t=40, b=10),
     )
+
     return fig
 
 
-def make_circularity_bar_figure(metrics: dict) -> go.Figure:
-    """Bar chart of Circular vs Accessible vs Lost fractions of N input."""
+def make_circularity_bar_figure(metrics):
     input_N = metrics["input_N"]
     circular = metrics["circular_N"] / input_N * 100
     accessible = metrics["accessible_N"] / input_N * 100
     lost = metrics["lost_N"] / input_N * 100
 
-    categories = ["Circular (products)", "Accessible (soil available)", "Lost (env + locked)"]
-    values = [circular, accessible, lost]
-
     fig = go.Figure(
         data=[go.Bar(
-            x=categories,
-            y=values,
-            text=[f"{v:.1f}%" for v in values],
+            x=["Circular", "Accessible", "Lost"],
+            y=[circular, accessible, lost],
+            text=[f"{circular:.1f}%", f"{accessible:.1f}%", f"{lost:.1f}%"],
             textposition="auto",
         )]
     )
-    fig.update_yaxes(title="Percent of external N input", range=[0, 100])
+
     fig.update_layout(
-        title="Nitrogen Circularity Breakdown",
-        margin=dict(l=60, r=20, t=60, b=40),
-        autosize=False,
+        title="N Circularity Breakdown",
         width=400,
         height=400,
+        margin=dict(l=60, r=20, t=60, b=40),
     )
+
     return fig
 
 
 # ---------------------------
-# 4. DASH APP LAYOUT
+# 4. LAYOUT
 # ---------------------------
-
-app = dash.Dash(__name__)
-
-# expose the underlying Flask server for gunicorn
-server = app.server
-
-# Baseline metrics for initial display
 baseline_metrics = compute_circularity_metrics_N(BASE_FLOWS_N)
 
-app.layout = html.Div(
-    style={"fontFamily": "Arial, sans-serif", "margin": "20px"},
-    children=[
-        html.H2("Toy Pig Nutrient Circularity DST – Nitrogen Demo"),
+app.layout = html.Div([
+    html.H2("Toy Pig Nutrient Circularity DST – Nitrogen Demo"),
 
-        html.P(
-            "Baseline grow–finish farm N budget using a matrix-based representation. "
-            "Adjust housing N losses and see how flows and circularity metrics respond."
+    html.Div([
+        html.Label("Reduce housing N losses (F7) by (%)"),
+        dcc.Slider(
+            id="housing-reduction",
+            min=0,
+            max=50,
+            step=1,
+            value=5,
+            marks={0: "0%", 10: "10%", 25: "25%", 50: "50%"},
         ),
+    ], style={"maxWidth": "500px", "marginBottom": "20px"}),
 
-        html.Div(
-            style={"marginBottom": "20px", "maxWidth": "500px"},
-            children=[
-                html.Label("Reduce housing N losses (F7) by (%)"),
-                dcc.Slider(
-                    id="housing-reduction",
-                    min=0,
-                    max=50,
-                    step=1,
-                    value=5,
-                    marks={0: "0%", 5: "5%", 10: "10%", 25: "25%", 50: "50%"},
-                ),
-            ],
-        ),
-
-        html.Div(
-            style={"display": "flex", "gap": "40px"},
-            children=[
-                html.Div(
-                    style={"flex": "2", "minWidth": "600px"},
-                    children=[
-                        dcc.Graph(
-                            id="sankey-graph",
-                            figure=make_sankey_figure(BASE_FLOWS_N),
-                            style={"height": "520px"},  # roughly match figure height
-                        )
-                    ],
-                ),
-                html.Div(
-                    style={"flex": "1", "maxWidth": "450px"},
-                    children=[
-                        dcc.Graph(
-                            id="circularity-bar",
-                            figure=make_circularity_bar_figure(baseline_metrics),
-                            style={"height": "420px"},
-                        ),
-                        html.H4("Key Numbers (N, kg/year):"),
-                        html.Ul(
-                            id="metrics-list",
-                            children=[
-                                html.Li(f"External N input = {baseline_metrics['input_N']:.0f} kg N/yr"),
-                                html.Li(f"Circular (products) = {baseline_metrics['circular_N']:.0f} kg N/yr"),
-                                html.Li(f"Accessible (soil available) = {baseline_metrics['accessible_N']:.0f} kg N/yr"),
-                                html.Li(f"Lost (env + locked) = {baseline_metrics['lost_N']:.0f} kg N/yr"),
-                                html.Li(f"Housing N loss (F7) = {BASE_FLOWS_N['F7']:.0f} kg N/yr"),
-                                html.Li(f"Total environmental N loss = {baseline_metrics['env_loss']:.0f} kg N/yr"),
-                                html.Li(f"Net stable soil N gain = {baseline_metrics['locked_stable']:.0f} kg N/yr"),
-                            ],
-                        ),
-                    ],
-                ),
-            ],
-        ),
-    ],
-)
+    html.Div(style={"display": "flex", "gap": "40px"}, children=[
+        html.Div(style={"flex": "2"}, children=[
+            dcc.Graph(
+                id="sankey-graph",
+                figure=make_sankey_figure(BASE_FLOWS_N),
+                style={"height": "520px"}
+            )
+        ]),
+        html.Div(style={"flex": "1"}, children=[
+            dcc.Graph(
+                id="circularity-bar",
+                figure=make_circularity_bar_figure(baseline_metrics)
+            ),
+            html.H4("Key Numbers (kg N/yr)"),
+            html.Ul(id="metrics-list", children=[
+                html.Li(f"External N input = {baseline_metrics['input_N']:.0f}"),
+                html.Li(f"Circular = {baseline_metrics['circular_N']:.0f}"),
+                html.Li(f"Accessible = {baseline_metrics['accessible_N']:.0f}"),
+                html.Li(f"Lost = {baseline_metrics['lost_N']:.0f}"),
+            ])
+        ]),
+    ])
+])
 
 
 # ---------------------------
-# 5. CALLBACK: apply intervention
+# 5. CALLBACK
 # ---------------------------
-
 @app.callback(
     [
         Output("sankey-graph", "figure"),
@@ -278,45 +229,29 @@ app.layout = html.Div(
     Input("housing-reduction", "value"),
 )
 def update_scenario(housing_reduction_percent):
-    """
-    Adjust housing N loss (F7) by a given % reduction.
-    The N saved from reduced housing emissions is routed to excretion (F6),
-    i.e., more N ends in manure storage instead of the environment.
-    Other flows (F8, F9, F11...) are kept fixed in this toy demo.
-    """
     flows = copy.deepcopy(BASE_FLOWS_N)
 
-    reduction_factor = housing_reduction_percent / 100.0
+    reduction = housing_reduction_percent / 100.0
+    saved = flows["F7"] * reduction
 
-    baseline_F7 = BASE_FLOWS_N["F7"]
-    baseline_F6 = BASE_FLOWS_N["F6"]
+    flows["F7"] *= (1 - reduction)
+    flows["F6"] += saved
 
-    new_F7 = baseline_F7 * (1 - reduction_factor)
-    delta = baseline_F7 - new_F7  # N saved from housing emissions
-
-    # Apply intervention
-    flows["F7"] = new_F7
-    flows["F6"] = baseline_F6 + delta
-
-    # Recompute metrics
     metrics = compute_circularity_metrics_N(flows)
 
-    # Updated figures
-    sankey_fig = make_sankey_figure(flows)
-    bar_fig = make_circularity_bar_figure(metrics)
-
-    # Updated metrics list
     metrics_children = [
-        html.Li(f"External N input = {metrics['input_N']:.0f} kg N/yr"),
-        html.Li(f"Circular (products) = {metrics['circular_N']:.0f} kg N/yr"),
-        html.Li(f"Accessible (soil available) = {metrics['accessible_N']:.0f} kg N/yr"),
-        html.Li(f"Lost (env + locked) = {metrics['lost_N']:.0f} kg N/yr"),
-        html.Li(f"Housing N loss (F7) = {flows['F7']:.0f} kg N/yr"),
-        html.Li(f"Total environmental N loss = {metrics['env_loss']:.0f} kg N/yr"),
-        html.Li(f"Net stable soil N gain = {metrics['locked_stable']:.0f} kg N/yr"),
+        html.Li(f"External N input = {metrics['input_N']:.0f}"),
+        html.Li(f"Circular = {metrics['circular_N']:.0f}"),
+        html.Li(f"Accessible = {metrics['accessible_N']:.0f}"),
+        html.Li(f"Lost = {metrics['lost_N']:.0f}"),
+        html.Li(f"Housing loss (F7) = {flows['F7']:.0f}"),
     ]
 
-    return sankey_fig, bar_fig, metrics_children
+    return (
+        make_sankey_figure(flows),
+        make_circularity_bar_figure(metrics),
+        metrics_children,
+    )
 
 
 if __name__ == "__main__":
