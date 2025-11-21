@@ -1,4 +1,4 @@
-# app.py
+# dply_interact_app.py
 import copy
 
 import dash
